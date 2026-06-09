@@ -1,0 +1,6 @@
+{
+  "name": "CineMatch India",
+  "description": "The ultimate personalized companion for Netflix India. CineMatch uses user mood, custom preferences, and watch-time budgets to deliver collaborative-filtering and machine learning backed recommendations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
