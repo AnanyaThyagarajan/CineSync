@@ -8,6 +8,10 @@ import RecommendationList from './components/RecommendationList';
 import WatchHistory from './components/WatchHistory';
 import CollaborativeInsights from './components/CollaborativeInsights';
 
+// Google Workspace & Sheets integration modules
+import { initAuth, googleSignIn, logoutGoogle } from './lib/firebaseAuth';
+import { syncUserDataToGoogleSheets } from './lib/googleSync';
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [recommendations, setRecommendations] = useState<MovieRecommendation[]>([]);
@@ -23,9 +27,89 @@ export default function App() {
   // Settings pane expand
   const [showSettings, setShowSettings] = useState<boolean>(false);
 
+  // Google Sheets integration state variables
+  const [googleUser, setGoogleUser] = useState<any>(null);
+  const [googleToken, setGoogleToken] = useState<string | null>(null);
+  const [spreadsheetUrl, setSpreadsheetUrl] = useState<string | null>(null);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncTime, setSyncTime] = useState<string | null>(null);
+
+  // Firebase auth initialization and in-memory token retrieval
+  useEffect(() => {
+    const unsubscribe = initAuth(
+      (firebaseUser, token) => {
+        setGoogleUser(firebaseUser);
+        setGoogleToken(token);
+        const cachedUrl = localStorage.getItem('cinesync_sheet_url');
+        if (cachedUrl) {
+          setSpreadsheetUrl(cachedUrl);
+        }
+      },
+      () => {
+        setGoogleUser(null);
+        setGoogleToken(null);
+      }
+    );
+    return () => unsubscribe();
+  }, []);
+
+  const performDriveSheetsSync = async (targetUser: User, tokenToUse: string) => {
+    setIsSyncing(true);
+    setSyncError(null);
+    try {
+      const result = await syncUserDataToGoogleSheets(targetUser, tokenToUse);
+      if (result.success && result.spreadsheetUrl) {
+        setSpreadsheetUrl(result.spreadsheetUrl);
+        localStorage.setItem('cinesync_sheet_url', result.spreadsheetUrl);
+        setSyncTime(new Date().toLocaleTimeString());
+      } else {
+        setSyncError(result.error || "Failed to synchronize to Google Sheets.");
+      }
+    } catch (err: any) {
+      console.error("Sheets sync error:", err);
+      setSyncError("Something went wrong during Google Sheets sync.");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    setIsSyncing(true);
+    setSyncError(null);
+    try {
+      const result = await googleSignIn();
+      if (result) {
+        setGoogleUser(result.user);
+        setGoogleToken(result.accessToken);
+        if (user) {
+          await performDriveSheetsSync(user, result.accessToken);
+        }
+      }
+    } catch (err: any) {
+      console.error("Google login failed:", err);
+      setSyncError("Google Sheets sign-in failed. Please try again.");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleGoogleLogout = async () => {
+    try {
+      await logoutGoogle();
+      setGoogleUser(null);
+      setGoogleToken(null);
+      setSpreadsheetUrl(null);
+      localStorage.removeItem('cinesync_sheet_url');
+      setSyncTime(null);
+    } catch (err) {
+      console.error("Logout failed:", err);
+    }
+  };
+
   // Load from localStorage local caching to prevent loss of state on quick refreshes
   useEffect(() => {
-    const cachedUser = localStorage.getItem('cinematch_user');
+    const cachedUser = localStorage.getItem('cinesync_user');
     if (cachedUser) {
       try {
         const parsed = JSON.parse(cachedUser);
@@ -47,13 +131,13 @@ export default function App() {
       const data = await response.json();
       if (data.user) {
         setUser(data.user);
-        localStorage.setItem('cinematch_user', JSON.stringify(data.user));
+        localStorage.setItem('cinesync_user', JSON.stringify(data.user));
         // Get initial suggestions immediately based on general preferences
         getInitialRecommendations(data.user);
       }
     } catch (e) {
       console.error("User fetch failed: ", e);
-      setErrorMessage("Network issue syncing with CineMatch cluster.");
+      setErrorMessage("Network issue syncing with CineSync India cluster.");
     } finally {
       setIsLoading(false);
     }
@@ -86,15 +170,19 @@ export default function App() {
 
   const handleOnboardComplete = (onboardedUser: User) => {
     setUser(onboardedUser);
-    localStorage.setItem('cinematch_user', JSON.stringify(onboardedUser));
+    localStorage.setItem('cinesync_user', JSON.stringify(onboardedUser));
     getInitialRecommendations(onboardedUser);
+    
+    if (googleToken) {
+      performDriveSheetsSync(onboardedUser, googleToken);
+    }
   };
 
   const handleLogout = () => {
     setUser(null);
     setRecommendations([]);
     setCollaborativeStats([]);
-    localStorage.removeItem('cinematch_user');
+    localStorage.removeItem('cinesync_user');
     setShowSettings(false);
   };
 
@@ -134,7 +222,11 @@ export default function App() {
           moodHistory: dataMood.moodHistory
         };
         setUser(updatedUser);
-        localStorage.setItem('cinematch_user', JSON.stringify(updatedUser));
+        localStorage.setItem('cinesync_user', JSON.stringify(updatedUser));
+        
+        if (googleToken) {
+          performDriveSheetsSync(updatedUser, googleToken);
+        }
       }
 
       setRecommendations(dataRecs.recommendations || []);
@@ -179,14 +271,18 @@ export default function App() {
           watchHistory: data.watchHistory
         };
         setUser(updatedUser);
-        localStorage.setItem('cinematch_user', JSON.stringify(updatedUser));
+        localStorage.setItem('cinesync_user', JSON.stringify(updatedUser));
+        
+        if (googleToken) {
+          performDriveSheetsSync(updatedUser, googleToken);
+        }
         
         // Remove from current suggestions list to make space for remaining recommendations
         setRecommendations((prev) => prev.filter((r) => r.title.toLowerCase() !== movie.title.toLowerCase()));
       }
     } catch (err) {
       console.error("Failed to log watch item: ", err);
-      setErrorMessage("Failed to sync watch history with CineMatch cluster.");
+      setErrorMessage("Failed to sync watch history with CineSync India cluster.");
     }
   };
 
@@ -199,8 +295,12 @@ export default function App() {
       const data = await response.json();
       if (data.success) {
         setUser(data.user);
-        localStorage.setItem('cinematch_user', JSON.stringify(data.user));
+        localStorage.setItem('cinesync_user', JSON.stringify(data.user));
         setRecommendations([]);
+        
+        if (googleToken) {
+          performDriveSheetsSync(data.user, googleToken);
+        }
       }
     } catch (err) {
       console.error("failed clearing logs: ", err);
@@ -219,8 +319,13 @@ export default function App() {
       const data = await response.json();
       if (data.user) {
         setUser(data.user);
-        localStorage.setItem('cinematch_user', JSON.stringify(data.user));
+        localStorage.setItem('cinesync_user', JSON.stringify(data.user));
         setShowSettings(false);
+        
+        if (googleToken) {
+          performDriveSheetsSync(data.user, googleToken);
+        }
+        
         // Refresh recommendations
         getInitialRecommendations(data.user);
       }
@@ -350,6 +455,79 @@ export default function App() {
               </div>
             </div>
           )}
+
+          {/* Google Sheets Sync Integration Console */}
+          <section id="google-sheets-sync-section" className="bg-gradient-to-r from-[#141416] to-[#16161a] border border-white/10 rounded-2xl p-6 shadow-xl relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full blur-2xl pointer-events-none" />
+            <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
+              <div className="space-y-1.5 max-w-xl">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <h2 className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-400 font-mono">Google Workspace Sync</h2>
+                </div>
+                <h3 className="text-lg font-bold text-white tracking-tight">
+                  Dynamic Companion Sheets
+                </h3>
+                <p className="text-xs text-slate-400 font-medium leading-relaxed">
+                  Export your personal CineSync India profile, watch logs, and mood historical telemetry directly to a designated, self-updating Google Spreadsheet in your personal Google Drive with your permission.
+                </p>
+                {syncError && (
+                  <p className="text-xs text-red-400 font-semibold bg-red-950/20 px-3 py-1.5 rounded border border-red-900/45 mt-2 inline-block">
+                    Error: {syncError}
+                  </p>
+                )}
+                {syncTime && (
+                  <p className="text-[10px] text-emerald-400/90 font-mono mt-1 font-bold">
+                    ✓ Last synchronization completed successfully at {syncTime}
+                  </p>
+                )}
+              </div>
+
+              <div className="shrink-0 flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+                {googleToken ? (
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full">
+                    {spreadsheetUrl && (
+                      <a
+                        href={spreadsheetUrl}
+                        target="_blank"
+                        referrerPolicy="no-referrer"
+                        className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-emerald-950/30 hover:bg-emerald-900/40 text-emerald-350 hover:text-emerald-300 rounded-xl border border-emerald-800/40 hover:border-emerald-700/50 transition-all text-xs font-bold font-mono"
+                      >
+                        Open Spreadsheet ↗
+                      </a>
+                    )}
+                    <button
+                      onClick={() => performDriveSheetsSync(user, googleToken)}
+                      disabled={isSyncing}
+                      className="px-5 py-2.5 bg-white/5 hover:bg-white/10 text-white rounded-xl border border-white/10 transition-colors text-xs font-bold min-w-[120px] cursor-pointer"
+                    >
+                      {isSyncing ? "Syncing..." : "Sync Now"}
+                    </button>
+                    <button
+                      onClick={handleGoogleLogout}
+                      className="inline-flex justify-center items-center gap-1.5 px-4 py-2.5 hover:bg-red-950/20 text-slate-400 hover:text-red-400 rounded-xl transition-all text-xs cursor-pointer"
+                    >
+                      Disconnect Sheets
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={handleGoogleLogin}
+                    disabled={isSyncing}
+                    className="flex items-center justify-center gap-3 bg-white/5 hover:bg-white/10 border border-white/15 px-5 py-3 rounded-xl text-xs font-bold text-white transition-all cursor-pointer w-full sm:w-auto"
+                  >
+                    <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-5 h-5 block shrink-0">
+                      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
+                      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
+                      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
+                      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
+                    </svg>
+                    <span>Connect Google Sheets & Drive</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </section>
 
           {/* Core Row: Mood Check-In */}
           <section id="moodcheck-section">

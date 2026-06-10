@@ -1,6 +1,6 @@
 {
   "name": "CineSync India",
-  "description": "Personalized companion for Netflix India using user mood and watch-time budgets for dynamic recommendations.",
+  "description": "The ultimate personalized companion for Netflix India. CineSync India uses user mood, custom preferences, and watch-time budgets to deliver collaborative-filtering and machine learning backed recommendations.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

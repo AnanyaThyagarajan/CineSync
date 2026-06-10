@@ -466,7 +466,7 @@ app.post("/api/recommendations", async (req, res) => {
   try {
     // Generate intelligent companion suggestions
     const prompt = `
-      You are the companion AI recommender for CineMatch India, matching users perfectly with content available on Netflix India version.
+      You are the companion AI recommender for CineSync India, matching users perfectly with content available on Netflix India version.
       
       User Profile:
       - Preferred Audio Languages: ${preferredLanguages.join(", ")}
@@ -497,7 +497,7 @@ app.post("/api/recommendations", async (req, res) => {
       model: "gemini-3.5-flash",
       contents: prompt,
       config: {
-        systemInstruction: "You are CineMatch India's premier cinephile assistant. Your suggestions must reside on Netflix India. Be precise with metadata. Optimize relevance scores (from 75 to 99). Generate beautiful and human-like custom 'matchReason' entries referencing collaborative clusters and individual watch history context.",
+        systemInstruction: "You are CineSync India's premier cinephile assistant. Your suggestions must reside on Netflix India. Be precise with metadata. Optimize relevance scores (from 75 to 99). Generate beautiful and human-like custom 'matchReason' entries referencing collaborative clusters and individual watch history context.",
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.ARRAY,
@@ -676,7 +676,7 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`CineMatch India Server running at http://0.0.0.0:${PORT}`);
+    console.log(`CineSync India Server running at http://0.0.0.0:${PORT}`);
   });
 }
 
